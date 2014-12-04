@@ -1,0 +1,19 @@
+==================================================================
+Route64 -- Windows library for WoW32->WoW64
+Copyright (C) 2014 - vividrev -- see doc\LICENSE.TXT
+==================================================================
+
+Route64 is a simple library that allows basic interaction with the 
+overlying 64 bit layer for a 32 bit application. It supports basic 
+operations like reading, writing, and calling 64 bit functions in 
+64 bit address spaces. 
+  
+  > Route64.asm -- library, compiled with "FASM Route64.asm"
+  > Route64.h   -- C header for compiled obj
+  > LICENSE     -- MIT license
+
+Project hosted at http://github.com/vividrev/
+
+ -- vividrev (vividrev@outlook.com) :: netrev.0fees.us
+ 
+==================================================================
