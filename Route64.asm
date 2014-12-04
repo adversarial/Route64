@@ -150,6 +150,7 @@ WoW64Stdcall64:
 	; 8 | QWORD Num_args
 	; 0 | QWORD ret addr
 	;   V
+; Not sure if this is necessary buttttt
 align 16
 HeavensGate:
   use64
@@ -199,46 +200,45 @@ use32	retf
 ;                             __u32 const uchar* Src, size_t cbSrc)
 x64Write:
   use64
-	mov r10, rsi
-	mov r11, rdi
   ; convert struct { uint32_t lo, hi; } addr64 to void*
-	mov edi, edx
-	shl rdi, 32	; DestHigh
-	or rdi, rcx	; DestLow
+	shl rdx, 32	; DestHigh
+	or rcx, rdx	; DestLow
+  ; shift args down
+	mov rdx, r8	; Src
+	mov r8, r9	; cbDest
 
-	mov rsi, r8	; Src
-	mov rcx, r9	; cbDest
-	mov rax, rcx	; return
-
-	cld
-	rep movsb
-
-	sub rcx, rax	; difference written : expected
-
-	mov rsi, r10
-	mov rdi, r11
+	call x64Copy ; Dest, Src, cbDest
 	ret
 
 ; PRIVATE size_t __stdcall xx(__64 const uchar* SrcLow, __64 const uchar* SrcHigh,
 ;                             __32 uchar* Dest, size_t cbDest)
 x64Read:
   use64
-	mov r10, rsi
-	mov r11, rdi
   ; convert struct { uint32_t lo, hi; } addr64 to void*
-	mov esi, edx
-	shl rsi, 32	; DestHigh
-	or rsi, rcx	; DestLow
+	shl rdx, 32
+	or rdx, rcx	; SrcLow
+  ; shift args down
+	mov rcx, r8
+	mov r8, r9
 
-	mov rdi, r8	; Dest
-	mov rcx, r9	; cbDest
-	mov rax, rcx	; Difference for return
+	call x64Copy	; Dest, Src, cbDest
+	ret
+
+; PRIVATE size_t __stdcall xx(__64 uchar* Dest, __64 const uchar* Src, size_t cbDest)
+x64Copy:
+	mov r10, rsi
+	mov rsi, rcx	; Src
+
+	mov rcx, r8	; cbDest
+	xchg rdx, rdi	; Dest, [preserve]
+
+	mov rax, rcx
 
 	cld
 	rep movsb
 
-	sub rcx, rax	; difference read : expected
+	sub rax, rcx	; expected : written
 
-	mov rsi, r10
-	mov rdi, r11
+	mov rsi, r10	; [preserved]
+	mov rdi, rdx	; [preserved]
 	ret
