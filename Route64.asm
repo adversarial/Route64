@@ -47,22 +47,23 @@ use32
 ; size_t __stdcall xx(void* Dest, void* Src, size_t cb)
 _x64CopyMemory:
 use64
-    push rsi
-    push rdi
-    
-    mov rsi, rcx
+    mov rax, rdi
     mov rdi, rdx
+    mov rdx, rsi
+    mov rsi, rcx
     mov rcx, r8
     
     cld
     rep movsb
-    
-    pop rdi
-    pop rsi
+    sub r8, rcx     ; difference of needed : unwritten
+ 
+    mov rdi, rax
+    mov rsi, rdx
+    mov rax, r8
     ret 8*4
     
 
-; bool __cdecl xx(uintptr_t AddrHigh, uintptr_t AddrLow, uintptr_t* RetHigh, uintptr_t* RetLow, uint args_cb, uint64_t* args)
+; bool __stdcall xx(uintptr_t AddrHigh, uintptr_t AddrLow, uintptr_t* RetHigh, uintptr_t* RetLow, uint args_cb, uint64_t* args)
 WoW64Stdcall64:
 use32
     push ebp edi esi ebx
@@ -74,28 +75,28 @@ use32
     
     ; setup args
     mov ecx, [esp+4*4+4+4*2]    ; args_cb
-    shr ecx, 2          ; args_cb / sizeof(word) = num_arg_words
+    shr ecx, 2                  ; args_cb / sizeof(word) = num_arg_words
     mov esi, [esp+4*4+4+4*3]    ; &args[]
     lea esi, [esi+ecx*8-8]      ; end of args, copy in reverse order
     
     lea ebp, [esp+4*4+4+4*0]    ; AddrHigh, AddLow, RetHigh, RetLow
     
     ; setup stack
-    sub esp, 8*3            ; uint64_t SavedRegisters[3], ensure minimum padding
+    sub esp, 8*3                ; uint64_t SavedRegisters[3], ensure minimum padding
     mov eax, esp
-    and eax, 7          ; check if bits need to be aligned
-    xor eax, 7          ; flip alignment bits to get inverse
+    and eax, 7                  ; check if bits need to be aligned
+    xor eax, 7                  ; flip alignment bits to get inverse
     add eax, 1
-    add esp, eax            ; align to 8
+    add esp, eax                ; align to 8
     
     ; pass args
-    push eax            ; align lo
-    push 0              ; align hi
-    std             ; push args last-first
+    push eax                    ; align lo
+    push 0                      ; align hi
+    std                         ; push args last-first
  
     mov edx, ecx
   @@:   
-    lodsd               ; get next arg *(uint32_t*)args++
+    lodsd                       ; get next arg *(uint32_t*)args++
     push eax
     sub ecx, 1
     ja @b
