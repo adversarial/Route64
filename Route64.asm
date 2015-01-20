@@ -4,12 +4,15 @@
 ;; Implements several routines to "break  through" the WoW64 layer.
 ;; by ~vividrev
 ;;
+;; 1/20/15:
+;;      0.2: Refactored
 ;; 12/3/14:
 ;;      0.1: It works
 ;;
 ; todo list:
-;      refactor
-;      fix internal errors (register scrapping)
+; [x]   refactor
+; [x]   fix internal errors (register scrapping)
+; [ ]   debug
 
 include '%inc%\win32a.inc'
 format MS COFF
@@ -18,227 +21,145 @@ CS_MODE_WOW64 = $23
 CS_MODE_NATIVE_AMD64 = $33
 
 
-public WoW64Write64 as '_WoW64Write64@16'
-public WoW64Read64 as '_WoW64Read64@16'
+public WoW64CopyMemory as '_WoW64CopyMemory@24'
 public WoW64Stdcall64 as '_WoW64Stdcall64@16'
 
 ;======= Code ===================================
 section '.text' code readable executable align 16
 ;================================================
+; size_t __stdcall xx(uintptr_t DestHigh, uintptr_t DestLow, uintptr_t SrcHigh, uintptr_t SrcLow, size_t cbHigh, size_t cbLow)
+WoW64CopyMemory:
 use32
-; size_t __stdcall xx(uchar* DestLow, uchar* DestHigh,
-;                     const uchar* Src, size_t cbSrc)
-WoW64Write64:
-	push ebx
-	push esi
-	lea eax, [esp+$c]	 ; args[]
-	stdcall WoW64Stdcall64, x64Write,\  ; DestLow => Dest
-				 0,\	; DestHigh=> our code is in 32 bit space
-				 4*4,\	; cb_args => sizeof(args)
-				 eax	; args&   => &args[Src]
+    lea ecx, [esp+4]    ; &args[0]
+    push edi
+    
+    sub esp, 8
+    mov eax, esp; retval*
+    
+    stdcall _x64CopyMemory, 0, eax, 0, 4*6, ecx
+    
+    pop eax     ; retval hi
+    pop eax     ; retval lo
+    
+    pop edi
+    ret 4*6
 
-	pop esi
-	pop ebx
-	ret 4*4
+; size_t __stdcall xx(void* Dest, void* Src, size_t cb)
+_x64CopyMemory:
+use64
+    push rsi
+    push rdi
+    
+    mov rsi, rcx
+    mov rdi, rdx
+    mov rcx, r8
+    
+    cld
+    rep movsb
+    
+    pop rdi
+    pop rsi
+    ret 8*4
+    
 
-; size_t __stdcall xx(const uchar* SrcLow, const uchar* SrcHigh,
-;                     uchar* Dest, size_t cbDest)
-WoW64Read64:
-	push ebx	; random functions save random registers
-	push esi	; todo: refactor
-
-	lea eax, [esp+$c]		    ; args[]
-	stdcall WoW64Stdcall64, x64Read,\  ; DestLow => Dest
-				 0,\	; DestHigh=> our code is in 32 bit space
-				 4*4,\	; cb_args => sizeof(args)
-				 eax	; args&   => &args[Dest]
-	pop esi
-	pop ebx
-	ret 4*4
-
-; uint32_t __cdecl xx(uintptr_t AddrLow, uintptr_t AddrHigh, uint args_cb, void** args)
+; bool __cdecl xx(uintptr_t AddrHigh, uintptr_t AddrLow, uintptr_t* RetHigh, uintptr_t* RetLow, uint args_cb, uint64_t* args)
 WoW64Stdcall64:
-	push ebp
-	push edi
-	push esi
+use32
+    push ebp edi esi ebx
+    
+    mov eax, cs
+    cmp eax, CS_MODE_WOW64
+    xor eax, eax
+    jne .Done
+    
+    ; setup args
+    mov ecx, [esp+4*4+4+4*2]    ; args_cb
+    shr ecx, 2          ; args_cb / sizeof(word) = num_arg_words
+    mov esi, [esp+4*4+4+4*3]    ; &args[]
+    lea esi, [esi+ecx*8-8]      ; end of args, copy in reverse order
+    
+    lea ebp, [esp+4*4+4+4*0]    ; AddrHigh, AddLow, RetHigh, RetLow
+    
+    ; setup stack
+    sub esp, 8*3            ; uint64_t SavedRegisters[3], ensure minimum padding
+    mov eax, esp
+    and eax, 7          ; check if bits need to be aligned
+    xor eax, 7          ; flip alignment bits to get inverse
+    add eax, 1
+    add esp, eax            ; align to 8
+    
+    ; pass args
+    push eax            ; align lo
+    push 0              ; align hi
+    std             ; push args last-first
+ 
+    mov edx, ecx
+  @@:   
+    lodsd               ; get next arg *(uint32_t*)args++
+    push eax
+    sub ecx, 1
+    ja @b
 
-	; Ensure we are in WoW64 mode
-	xor ecx, ecx
-	not ecx
-	mov eax, cs
-	cmp eax, CS_MODE_WOW64
-	cmovne eax, ecx 	; return -1
-	jne .Done
+    ; our implicit args
+    mov eax, [ebp+4*1]      ; Callee
+    push eax
+    mov eax, [ebp+4*0]
+    push eax
+    mov eax, [ebp+4*3]      ; RetVal*
+    push eax
+    mov eax, [ebp+4*2]
+    push eax
+    push edx                ; NumArgs
+    push 0
+    
+    ; far call pushes 2 dwords, { RetAddr, RetSegment }
+    call CS_MODE_NATIVE_AMD64:_HeavensGate
+    add esp, 4          ; align hi
+    pop eax             ; align lo
+    lea esp, [esp+eax+8*3]
+    mov eax, 1          ; ERROR_SUCCESS
+  .Done:    
+    pop ebx esi edi ebp
+    ret 4*4
 
-	mov ecx, [esp+4*3+4+4*2]	; args_cb
-	shr ecx, 2			; args_cb / sizeof(arg) = num args
-	mov esi, [esp+4*3+4+4*3]	; args[]
-	lea esi, [esi+ecx*4-4]		; advance to end of args, -4 to account for non-0index
-
-	xor eax, eax
-	xor edx, edx
-
-	; allocate space for saved registers in x64 mode, because we want to construct
-	; a call and leave the stack intact
-	; padding may be added, so this allocation may not necessarily be a pointer
-	sub esp, 8*3
-
-	; if num_args is even, we need to push an extra qword for alignment due
-	; to our own implicit padding arg, plus 2 extra (callee and num_args)
-	; if it's odd, the stack will be automatically aligned to 16
-	test ecx, 1
-	setz dl
-	shl edx, 3		; if num_args is odd, eax = 8 else eax = 0
-	; align stack to 8
-	; cb of alignment is pushed as qword
-	mov eax, esp		; lower 2 bits should never be set in x86-32 mode
-	and eax, $f		; is required to be 16 bit aligned
-	add eax, edx		; add args padding and SavedRegisters[]
-	sub esp, eax		; align up
-				; assert(!esp & 1111b)
-	; push qword(adjustment) to aligned stack
-	push 0			; hidword of align size
-	push eax		; align size
-	; stack is not necessarily aligned, but will be after args are pushed
-
-	mov ebp, [esp+eax+4+4+4*4+8*3]	  ; AddrLow
-	mov edx, [esp+eax+4+4+4*5+8*3]	  ; AddrHigh
-
-	mov edi, ecx		; save nArgs
-	std
-  @@:	lodsd			; get next arg = *(uint32_t*)args++
-	push 0			; uint64_t.hi = 0
-	push eax		; uint64_t.lo = arg
-	sub ecx, 1
-	jnz @b
-  .ArgsConverted:
-	push edx		; AddrHigh
-	push ebp		; AddrLow
-	push 0
-	push edi		; num_args
-	; far call pushes 2 dwords, { RetAddr, RetSegment }
-
-	call CS_MODE_NATIVE_AMD64:HeavensGate
-; HeavensGateRet
-; stack check (stdcall should clear args off stack)
-	; | padding
-	; - - - - - - - - - - - - - - 64bit accessible
-	; | QWORD SavedRegisters[3] - { rbx, rsi, rdi }
-	; | QWORD cbPadding
-	; V
-  .Done:
-	pop ecx 		; padding.lowdword
-	add ecx, 8*3+4		; SavedRegisters[] and (uint64_t){ .highdword }
-	add esp, ecx		; get rid of stack alignment padding
-
-	pop esi
-	pop edi
-	pop ebp
-
-	cld			; play nice with c
-
-	ret 4*4
-
-; PRIVATE uint32_t __stdcall xx(int nArgs, func_t Addr, ...)
-; stack check:
-	; padding
-	; - - - - - - - - - - - - - - 64bit accessible
-	;   | QWORD SavedRegisters[3] - { rbx, rsi, rdi }
-	;   | QWORD cbPadding
-	; 18| QWORD Args[]
-	; 10| QWORD Callee
-	; 8 | QWORD Num_args
-	; 0 | QWORD ret addr
-	;   V
-; Not sure if this is necessary buttttt
+; PRIVATE void xx(Farcall Return, uint NumArgs, uint* Retval, uintptr Callee, ...)
+_HeavensGate:
 align 16
-HeavensGate:
-  use64
-	mov rax, [rsp+8]	; num_args
-	; calculate SavedRegisters[] space, point to SavedRegisters[3]
-	lea rcx, [rsp+rax*8+8*3+8*2]
-	mov [rcx], rdi
-	mov [rcx+8], rsi
-	mov [rcx+8*2], rbx
+use64
+    ; save registers to preserve passed args for stack transplant
+    mov rcx, [rsp+8]            ; NumArgs
+    lea rax, [rsp+rcx*8+8*4]    ; &SavedRegisters[3]
+    mov [rax+8*0], rdi
+    mov [rax+8*1], rsi
+    mov [rax+8*2], rbx
 
-	pop rsi 		; save return addr and segment
-	pop rax 		; get num args
-	pop rbx 		; get callee
+    pop rbx             ; dword[] { RetAddr, RetSegment }
+    pop rax             ; NumArgs
+    pop rdi             ; RetVal ptr
+    pop rsi             ; Callee
 
-	; setup args - first four in rcx, rdx, r8, r9 respectively, rest on stack
-	test rax, rax
-	jz @f
-	pop rcx
-	sub rax, 1
-	jz @f
-	pop rdx
-	sub rax, 1
-	jz @f
-	pop r8
-	sub rax, 1
-	jz @f
-	pop r9
-	sub rax, 1
-	mov rdi, rax		; preserve num_args
-  @@:	call rbx
-; stack check (stdcall should clear args off stack)
-	; | padding
-	; - - - - - - - - - - - - - - 64bit accessible
-	; | QWORD SavedRegisters[3] - { rbx, rsi, rdi }
-	; | QWORD cbPadding
-	; V
-	mov rcx, rsi		; return address
-	; restore nonvolatile registers
-	mov rdi, [rsp+8+8*0]
-	mov rsi, [rsp+8+8*1]
-	mov rbx, [rsp+8+8*2]
+    test rax, rax
+    jna @f
+    pop rcx
+    sub rax, 1
+    jna @f
+    pop rdx
+    sub rax, 1
+    jna @f
+    pop r8
+    sub rax, 1
+    jna @f
+    pop r9
 
-	push rcx		; reset return address and segment
-use32	retf
+  @@:
+    sub rsp, 8*4        ; arg scratch space
+    call rsi
 
-; PRIVATE size_t __stdcall xx(__u32 uchar* DestLow, __u32 uchar* DestHigh,
-;                             __u32 const uchar* Src, size_t cbSrc)
-x64Write:
-  use64
-  ; convert struct { uint32_t lo, hi; } addr64 to void*
-	shl rdx, 32	; DestHigh
-	or rcx, rdx	; DestLow
-  ; shift args down
-	mov rdx, r8	; Src
-	mov r8, r9	; cbDest
-
-	call x64Copy ; Dest, Src, cbDest
-	ret
-
-; PRIVATE size_t __stdcall xx(__64 const uchar* SrcLow, __64 const uchar* SrcHigh,
-;                             __32 uchar* Dest, size_t cbDest)
-x64Read:
-  use64
-  ; convert struct { uint32_t lo, hi; } addr64 to void*
-	shl rdx, 32
-	or rdx, rcx	; SrcLow
-  ; shift args down
-	mov rcx, r8
-	mov r8, r9
-
-	call x64Copy	; Dest, Src, cbDest
-	ret
-
-; PRIVATE size_t __stdcall xx(__64 uchar* Dest, __64 const uchar* Src, size_t cbDest)
-x64Copy:
-	mov r10, rsi
-	mov rsi, rcx	; Src
-
-	mov rcx, r8	; cbDest
-	xchg rdx, rdi	; Dest, [preserve]
-
-	mov rax, rcx
-
-	cld
-	rep movsb
-
-	sub rax, rcx	; expected : written
-
-	mov rsi, r10	; [preserved]
-	mov rdi, rdx	; [preserved]
-	ret
+    mov [rdi], rax      ; save return val in 32bit accessible
+    mov rax, rbx        ; dword[] { RetAddr, RetSegment }
+    mov rdi, [rsp+8+8*0] 
+    mov rsi, [rsp+8+8*1]
+    mov rbx, [rsp+8+8*2]
+    push rax
+    retf
+    
