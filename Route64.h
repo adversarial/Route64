@@ -24,9 +24,9 @@ bool __stdcall WoW64Stdcallx64(uintptr_t CalleeHigh, uintptr_t CalleeLow,
 
 // Copies memory to/from 64 bit addresses
 // Returns bytes copied
-size_t __stdcall WoW64Write(uintptr_t DestHigh, uintptr_t DestLow, 
-                            uintptr_t SrcHigh, uintptr_t SrcLow, 
-                            size_t cbHigh, size_t cbLow);
+size_t __stdcall WoW64CopyMemory(uintptr_t DestHigh, uintptr_t DestLow, 
+                                 uintptr_t SrcHigh, uintptr_t SrcLow, 
+                                 size_t cbHigh, size_t cbLow);
                               
 #ifdef __cplusplus
 }
