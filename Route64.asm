@@ -14,34 +14,51 @@
 ; [x]   fix internal errors (register scrapping)
 ; [ ]   debug
 
-include '%inc%\win32a.inc'
-format MS COFF
+include 'win32a.inc'
+;format MS COFF
 
 CS_MODE_WOW64 = $23
 CS_MODE_NATIVE_AMD64 = $33
 
 
-public WoW64CopyMemory as '_WoW64CopyMemory@24'
-public WoW64Stdcall64 as '_WoW64Stdcall64@16'
+;public WoW64CopyMemory as '_WoW64CopyMemory@24'
+;public WoW64Stdcall64 as '_WoW64Stdcall64@16'
+
+format PE GUI 6.0 NX
+entry _ep
+
+section '.data' data readable
+tocopy dd $deadbeef
+data import
+library kernel32,'kernel32.dll'
+import kernel32,ExitProcess,'ExitProcess'
+end data
 
 ;======= Code ===================================
-section '.text' code readable executable align 16
+section '.text' code readable executable ;align 16
 ;================================================
+
+_ep:
+    sub esp, 4
+    mov ebp, esp
+    stdcall WoW64CopyMemory, 0, ebp,  0, tocopy, 0, 4
+    int3
+    add esp, 4
+    invoke ExitProcess,eax
+
 ; size_t __stdcall xx(uintptr_t DestHigh, uintptr_t DestLow, uintptr_t SrcHigh, uintptr_t SrcLow, size_t cbHigh, size_t cbLow)
 WoW64CopyMemory:
 use32
     lea ecx, [esp+4]    ; &args[0]
-    push edi
     
     sub esp, 8
     mov eax, esp; retval*
     
-    stdcall _x64CopyMemory, 0, eax, 0, 4*6, ecx
+    stdcall WoW64Stdcall64, 0, _x64CopyMemory, 0, eax, 0, 4*6, ecx
     
     pop eax     ; retval hi
     pop eax     ; retval lo
-    
-    pop edi
+
     ret 4*6
 
 ; size_t __stdcall xx(void* Dest, void* Src, size_t cb)
@@ -74,10 +91,10 @@ use32
     jne .Done
     
     ; setup args
-    mov ecx, [esp+4*4+4+4*2]    ; args_cb
+    mov ecx, [esp+4*4+4+4*5]    ; args_cb
     shr ecx, 2                  ; args_cb / sizeof(word) = num_arg_words
-    mov esi, [esp+4*4+4+4*3]    ; &args[]
-    lea esi, [esi+ecx*8-8]      ; end of args, copy in reverse order
+    mov esi, [esp+4*4+4+4*6]    ; &args[]
+    lea esi, [esi+ecx*4]      ; end of args, copy in reverse order
     
     lea ebp, [esp+4*4+4+4*0]    ; AddrHigh, AddLow, RetHigh, RetLow
     
@@ -99,7 +116,7 @@ use32
     lodsd                       ; get next arg *(uint32_t*)args++
     push eax
     sub ecx, 1
-    ja @b
+    jnb @b
 
     ; our implicit args
     mov eax, [ebp+4*1]      ; Callee
@@ -163,4 +180,3 @@ use64
     mov rbx, [rsp+8+8*2]
     push rax
     retf
-    
