@@ -12,39 +12,21 @@
 ; todo list:
 ; [x]   refactor
 ; [x]   fix internal errors (register scrapping)
-; [ ]   debug
+; [x]   debug
 
 include 'win32a.inc'
-;format MS COFF
+format MS COFF
 
 CS_MODE_WOW64 = $23
 CS_MODE_NATIVE_AMD64 = $33
 
 
-;public WoW64CopyMemory as '_WoW64CopyMemory@24'
-;public WoW64Stdcall64 as '_WoW64Stdcall64@16'
-
-format PE GUI 6.0 NX
-entry _ep
-
-section '.data' data readable
-tocopy dd $deadbeef
-data import
-library kernel32,'kernel32.dll'
-import kernel32,ExitProcess,'ExitProcess'
-end data
+public WoW64CopyMemory as '_WoW64CopyMemory@24'
+public WoW64Stdcall64 as '_WoW64Stdcall64@16'
 
 ;======= Code ===================================
-section '.text' code readable executable ;align 16
+section '.text' code readable executable align 16
 ;================================================
-
-_ep:
-    sub esp, 4
-    mov ebp, esp
-    stdcall WoW64CopyMemory, 0, ebp,  0, tocopy, 0, 4
-    int3
-    add esp, 4
-    invoke ExitProcess,eax
 
 ; size_t __stdcall xx(uintptr_t DestHigh, uintptr_t DestLow, uintptr_t SrcHigh, uintptr_t SrcLow, size_t cbHigh, size_t cbLow)
 WoW64CopyMemory:
