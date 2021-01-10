@@ -69,7 +69,6 @@ use32
     
     mov eax, cs
     cmp eax, CS_MODE_WOW64
-    xor eax, eax
     jne .Done
     
     ; setup args
